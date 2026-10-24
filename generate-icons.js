@@ -159,13 +159,6 @@ async function run() {
     .toFile(path.join(imagesDir, 'favicon.png'));
   console.log('Generated favicon.png (48x48)');
 
-  // 8. expo-logo.png (used by animated splash/icon in the app)
-  await sharp(cleanBuffer)
-    .resize(512, 512, { fit: 'contain', kernel: 'lanczos3' })
-    .png()
-    .toFile(path.join(imagesDir, 'expo-logo.png'));
-  console.log('Generated expo-logo.png (512x512) with Nesora logo');
-
   console.log('All icons regenerated with pristine transparency!');
 }
 
