@@ -1,8 +1,8 @@
 // File: nesora-app/src/app/(tabs)/you.tsx
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Ban, Bell, ChevronRight, Clapperboard, HardDrive, History, LogOut } from "lucide-react-native";
+import { Ban, Bell, ChevronRight, Clapperboard, FileText, HardDrive, History, LifeBuoy, LogOut, Scale, Shield } from "lucide-react-native";
 import Avatar from "@/components/ui/Avatar";
 import Button from "@/components/ui/Button";
 import { useMe } from "@/hooks/use-me";
@@ -101,6 +101,39 @@ export default function YouScreen() {
           </View>
           <ChevronRight size={20} color={colors.muted} />
         </Pressable>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>More info and support</Text>
+        <View style={[styles.list, { borderColor: colors.border }]}>
+          <Pressable
+            onPress={() => Linking.openURL("mailto:hello@nesora.com")}
+            style={({ pressed }) => [styles.row, { opacity: pressed ? 0.6 : 1 }]}
+            accessibilityRole="button"
+          >
+            <LifeBuoy size={22} color={colors.text} />
+            <View style={styles.rowText}>
+              <Text style={[styles.rowTitle, { color: colors.text }]}>Help & Customer Service</Text>
+              <Text style={[styles.rowSub, { color: colors.muted }]}>hello@nesora.com · hello@nesora.org</Text>
+            </View>
+            <ChevronRight size={20} color={colors.muted} />
+          </Pressable>
+          <Row
+            icon={<FileText size={22} color={colors.text} />}
+            title="Terms of Service"
+            onPress={() => openOnWeb("/terms")}
+          />
+          <Row
+            icon={<Scale size={22} color={colors.text} />}
+            title="Copyright & Intellectual Property"
+            onPress={() => openOnWeb("/copyright")}
+          />
+          <Row
+            icon={<Shield size={22} color={colors.text} />}
+            title="Privacy Policy"
+            onPress={() => openOnWeb("/privacy")}
+          />
+        </View>
       </View>
 
       <View style={styles.section}>

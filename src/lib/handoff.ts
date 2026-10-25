@@ -7,7 +7,7 @@ import { API_URL } from "./config";
 // Studio. We open them in the browser already signed in, using a one-minute,
 // single-use token (the server's /handoff route redeems it).
 
-export type WebPage = "/storage" | "/studio" | "/studio/new" | `/watch/${string}`;
+export type WebPage = "/storage" | "/studio" | "/studio/new" | `/watch/${string}` | "/terms" | "/copyright" | "/privacy";
 
 export async function openOnWeb(next: WebPage) {
   let url = `${API_URL}${next}`;
