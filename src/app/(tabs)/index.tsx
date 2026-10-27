@@ -65,7 +65,8 @@ export default function HomeScreen() {
           )
         }
         ListFooterComponent={feed.isFetchingNextPage ? <ActivityIndicator style={styles.more} color={colors.muted} /> : undefined}
-        removeClippedSubviews
+        removeClippedSubviews={false}
+        initialNumToRender={4}
         windowSize={7}
       />
       <InterestsModal visible={Boolean(me?.showInterestsPicker && categories.data?.length)} categories={categories.data ?? []} />

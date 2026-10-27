@@ -1,10 +1,12 @@
 // File: nesora-app/src/app/(tabs)/shorts.tsx
 import { useCallback, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, StyleSheet, Text, View, type ListViewToken } from "react-native";
+import { ActivityIndicator, Dimensions, FlatList, StyleSheet, Text, View, type ListViewToken } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useIsFocused, useLocalSearchParams } from "expo-router";
 import { StatusBar } from "expo-status-bar";
+import CategoryChips from "@/components/feed/CategoryChips";
 import ShortSlide from "@/components/shorts/ShortSlide";
+import { useCategories } from "@/hooks/use-home-feed";
 import { useShortsFeed } from "@/hooks/use-shorts-feed";
 import type { ShortItem } from "@/lib/types";
 
@@ -13,8 +15,10 @@ export default function ShortsScreen() {
   const insets = useSafeAreaInsets();
   const focused = useIsFocused();
   const { start } = useLocalSearchParams<{ start?: string }>();
-  const feed = useShortsFeed(start ?? null);
-  const [height, setHeight] = useState(0);
+  const [category, setCategory] = useState<string | null>(null);
+  const categories = useCategories();
+  const feed = useShortsFeed(start ?? null, category);
+  const [height, setHeight] = useState(() => Math.round(Dimensions.get("window").height));
   const [activeIndex, setActiveIndex] = useState(0);
   const [muted, setMuted] = useState(false);
   const listRef = useRef<FlatList<ShortItem>>(null);
@@ -29,7 +33,32 @@ export default function ShortsScreen() {
     if (first?.index != null) setActiveIndex(first.index);
   }).current;
 
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 50,
+    minimumViewTime: 0,
+  }).current;
+
   const toggleMute = useCallback(() => setMuted((m) => !m), []);
+
+  const handleSelectCategory = useCallback((slug: string | null) => {
+    setCategory(slug);
+    setActiveIndex(0);
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, []);
+
+  const renderItem = useCallback(
+    ({ item, index }: { item: ShortItem; index: number }) => (
+      <ShortSlide
+        short={item}
+        height={height}
+        active={focused && index === activeIndex}
+        mounted={Math.abs(index - activeIndex) <= 1}
+        muted={muted}
+        onToggleMute={toggleMute}
+      />
+    ),
+    [focused, activeIndex, height, muted, toggleMute],
+  );
 
   return (
     <View style={styles.root} onLayout={(e) => setHeight(Math.round(e.nativeEvent.layout.height))}>
@@ -39,16 +68,7 @@ export default function ShortsScreen() {
           ref={listRef}
           data={shorts}
           keyExtractor={(s) => s.id}
-          renderItem={({ item, index }) => (
-            <ShortSlide
-              short={item}
-              height={height}
-              active={focused && index === activeIndex}
-              mounted={Math.abs(index - activeIndex) <= 1}
-              muted={muted}
-              onToggleMute={toggleMute}
-            />
-          )}
+          renderItem={renderItem}
           pagingEnabled
           snapToInterval={height}
           snapToAlignment="start"
@@ -56,12 +76,13 @@ export default function ShortsScreen() {
           showsVerticalScrollIndicator={false}
           getItemLayout={(_, index) => ({ length: height, offset: height * index, index })}
           onViewableItemsChanged={onViewableItemsChanged}
-          viewabilityConfig={{ itemVisiblePercentThreshold: 80 }}
+          viewabilityConfig={viewabilityConfig}
           onEndReached={() => feed.hasNextPage && !feed.isFetchingNextPage && feed.fetchNextPage()}
           onEndReachedThreshold={2}
-          windowSize={3}
+          windowSize={5}
           initialNumToRender={2}
-          maxToRenderPerBatch={2}
+          maxToRenderPerBatch={3}
+          removeClippedSubviews={false}
           contentContainerStyle={{ paddingTop: 0 }}
           ListEmptyComponent={
             <View style={[styles.center, { height, paddingTop: insets.top }]}>
@@ -72,13 +93,23 @@ export default function ShortsScreen() {
                   Couldn&apos;t load Shorts. Tap to try again.
                 </Text>
               ) : (
-                <Text style={styles.emptyText}>No Shorts yet.</Text>
+                <Text style={styles.emptyText}>No Shorts yet in this category.</Text>
               )}
             </View>
           }
         />
       )}
-      <View style={[styles.topFade, { height: insets.top }]} pointerEvents="none" />
+      <View style={[styles.topFade, { height: insets.top + 50 }]} pointerEvents="none" />
+      {categories.data && categories.data.length > 0 && (
+        <View style={[styles.floatingChips, { top: insets.top + 4 }]}>
+          <CategoryChips
+            categories={categories.data}
+            selected={category}
+            onSelect={handleSelectCategory}
+            onDark
+          />
+        </View>
+      )}
     </View>
   );
 }
@@ -87,5 +118,6 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
   center: { alignItems: "center", justifyContent: "center" },
   emptyText: { color: "#fff", fontSize: 16 },
-  topFade: { position: "absolute", top: 0, left: 0, right: 0, backgroundColor: "rgba(0,0,0,0.25)" },
+  topFade: { position: "absolute", top: 0, left: 0, right: 0, backgroundColor: "rgba(0,0,0,0.35)" },
+  floatingChips: { position: "absolute", left: 0, right: 0, zIndex: 10 },
 });

@@ -52,7 +52,7 @@ function RootNavigator() {
   return (
     <>
       <StatusBar style={scheme === "dark" ? "light" : "dark"} />
-      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}>
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg }, animation: "fade_from_bottom" }}>
         {/* Every user is a fan; logging in or signing up goes straight to Home. */}
         <Stack.Protected guard={signedIn} redirectTo="/login">
           <Stack.Screen name="(tabs)" />

@@ -1,6 +1,6 @@
 // File: nesora-app/src/components/shorts/ShortSlide.tsx
 import { memo, useEffect, useRef, useState } from "react";
-import { Pressable, Share, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, AppState, Pressable, Share, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { useEvent } from "expo";
@@ -31,10 +31,12 @@ type Props = {
 function ShortSlide({ short, height, active, mounted, muted, onToggleMute }: Props) {
   return (
     <View style={[styles.slide, { height }]}>
+      {/* Thumbnail stays in the background so there is never a black flash or void while the video loads */}
+      {short.thumbnailUrl ? (
+        <Image source={{ uri: short.thumbnailUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
+      ) : null}
       {mounted ? (
         <ShortPlayer short={short} active={active} muted={muted} />
-      ) : short.thumbnailUrl ? (
-        <Image source={{ uri: short.thumbnailUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
       ) : null}
       <ShortOverlay short={short} muted={muted} onToggleMute={onToggleMute} />
     </View>
@@ -50,8 +52,11 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
   const player = useVideoPlayer(publicStream(short.playbackId), (p) => {
     p.loop = true;
     p.muted = muted;
+    p.staysActiveInBackground = true;
+    if (active) p.play();
   });
   const { isPlaying } = useEvent(player, "playingChange", { isPlaying: player.playing });
+  const { status } = useEvent(player, "statusChange", { status: player.status });
 
   useEffect(() => {
     player.muted = muted;
@@ -67,6 +72,23 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
     }
   }, [active, userPaused, player]);
 
+  // When player finishes buffering and is ready, trigger playback if active
+  useEffect(() => {
+    if (active && !userPaused && status === "readyToPlay" && !player.playing) {
+      player.play();
+    }
+  }, [active, userPaused, status, player]);
+
+  // Handle app lifecycle: ensure playing resumes if foregrounded
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        if (active && !userPaused && !player.playing) player.play();
+      }
+    });
+    return () => sub.remove();
+  }, [active, userPaused, player]);
+
   // Count a view once it has played for 2 seconds.
   useEffect(() => {
     if (!active || !isPlaying || viewed.current) return;
@@ -79,7 +101,18 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
 
   return (
     <Pressable style={StyleSheet.absoluteFill} onPress={() => setUserPaused((p) => !p)} accessibilityLabel={isPlaying ? "Pause" : "Play"}>
-      <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} />
+      <VideoView
+        player={player}
+        style={StyleSheet.absoluteFill}
+        contentFit="cover"
+        nativeControls={false}
+        surfaceType="textureView"
+      />
+      {!isPlaying && !userPaused && active && status === "loading" ? (
+        <View style={styles.loadingCenter} pointerEvents="none">
+          <ActivityIndicator color="#fff" size="small" />
+        </View>
+      ) : null}
       {!isPlaying && userPaused ? (
         <View style={styles.paused} pointerEvents="none">
           <Play size={56} color="#fff" fill="#fff" />
@@ -182,6 +215,7 @@ const shadow = { textShadowColor: "rgba(0,0,0,0.6)", textShadowOffset: { width: 
 const styles = StyleSheet.create({
   slide: { width: "100%", backgroundColor: "#000", overflow: "hidden" },
   paused: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.2)" },
+  loadingCenter: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" },
   mute: { position: "absolute", top: 12, right: 12, width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(0,0,0,0.35)", alignItems: "center", justifyContent: "center" },
   info: { position: "absolute", left: 12, right: 84, bottom: 16, gap: 8 },
   channel: { flexDirection: "row", alignItems: "center", gap: 10 },

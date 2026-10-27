@@ -265,6 +265,7 @@ export default function WatchPlayer(props: Props) {
           nativeControls={controls}
           fullscreenOptions={{ enable: controls }}
           allowsPictureInPicture={false}
+          surfaceType="textureView"
         />
       ) : posterUrl ? (
         <Image source={{ uri: posterUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />

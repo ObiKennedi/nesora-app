@@ -12,7 +12,10 @@
       "bundleIdentifier": "com.nesora.app",
       "supportsTablet": false,
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": [
+          "audio"
+        ]
       }
     },
     "android": {
@@ -40,7 +43,12 @@
         }
       ],
       "expo-secure-store",
-      "expo-video",
+      [
+        "expo-video",
+        {
+          "supportsBackgroundPlayback": true
+        }
+      ],
       [
         "expo-notifications",
         {
