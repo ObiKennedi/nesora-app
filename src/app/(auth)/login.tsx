@@ -8,6 +8,7 @@ import GoogleButton from "@/components/auth/GoogleButton";
 import Button from "@/components/ui/Button";
 import TextField from "@/components/ui/TextField";
 import { authClient, authErrorMessage } from "@/lib/auth-client";
+import { API_URL } from "@/lib/config";
 import { useTheme } from "@/theme/ThemeProvider";
 
 export default function LoginScreen() {
@@ -25,7 +26,20 @@ export default function LoginScreen() {
     const { error: err } = await authClient.signIn.email({ email: email.trim(), password });
     setBusy(false);
     // On success the session updates and the app switches to Home on its own.
-    if (err) setError(authErrorMessage(err));
+    if (err) {
+      if (err.code === "INVALID_EMAIL_OR_PASSWORD") {
+        try {
+          const res = await fetch(`${API_URL}/api/v1/auth/methods?email=${encodeURIComponent(email.trim().toLowerCase())}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.hasGoogle && !data.hasPassword) {
+              return setError("This account was created with Google. Please tap 'Continue with Google' to log in.");
+            }
+          }
+        } catch {}
+      }
+      setError(authErrorMessage(err));
+    }
   }
 
   return (

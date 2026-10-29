@@ -8,6 +8,7 @@ import GoogleButton from "@/components/auth/GoogleButton";
 import Button from "@/components/ui/Button";
 import TextField from "@/components/ui/TextField";
 import { authClient, authErrorMessage } from "@/lib/auth-client";
+import { API_URL } from "@/lib/config";
 import { useTheme } from "@/theme/ThemeProvider";
 
 export default function SignupScreen() {
@@ -27,9 +28,23 @@ export default function SignupScreen() {
     setBusy(true);
     setError(null);
     // Signing up logs the user in and goes straight to Home (no onboarding).
-    const { error: err } = await authClient.signUp.email({ name: name.trim(), email: email.trim(), password });
+    const normalizedEmail = email.trim().toLowerCase();
+    const { error: err } = await authClient.signUp.email({ name: name.trim(), email: normalizedEmail, password });
     setBusy(false);
-    if (err) setError(authErrorMessage(err));
+    if (err) {
+      if (err.code === "USER_ALREADY_EXISTS" || err.code === "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL") {
+        try {
+          const res = await fetch(`${API_URL}/api/v1/auth/methods?email=${encodeURIComponent(normalizedEmail)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.hasGoogle && !data.hasPassword) {
+              return setError("An account with this email was created with Google. Tap 'Continue with Google' to log in.");
+            }
+          }
+        } catch {}
+      }
+      setError(authErrorMessage(err));
+    }
   }
 
   return (
