@@ -29,6 +29,8 @@ export function authErrorMessage(error: { code?: string; message?: string; statu
       return "Password must be at least 8 characters.";
     case "ACCOUNT_SUSPENDED":
       return "This account has been suspended. Contact support@nesora.org if you think this is a mistake.";
+    case "INVALID_ORIGIN":
+      return "Security validation failed (untrusted origin). Please reload the app and try again.";
   }
   if (error?.status === 429) return "Too many attempts. Wait a minute and try again.";
   return error?.message || "Something went wrong. Check your connection and try again.";
