@@ -58,5 +58,16 @@ export function formatStorage(microMb: string | number) {
   const mb = Number(microMb) / MICRO_PER_MB;
   if (mb >= 1000) return `${(mb / 1000).toFixed(mb >= 10_000 ? 1 : 2).replace(/\.?0+$/, "")} GB`;
   if (mb >= 10) return `${Math.floor(mb)} MB`;
-  return `${mb.toFixed(2).replace(/\.?0+$/, "") || "0"} MB`;
+  return `${mb.toFixed(2).replace(/\.?0+$/, "") || "0"} MB`;
+}
+
+export function formatStorageDetailed(microMb: string | number) {
+  const mb = Number(microMb) / MICRO_PER_MB;
+  if (mb >= 1000) {
+    const gb = mb / 1000;
+    return `${gb.toFixed(3)} GB (${Math.floor(mb)} MB)`;
+  }
+  if (mb >= 10) return `${mb.toFixed(1)} MB`;
+  return `${mb.toFixed(2)} MB`;
+
 }

@@ -1,6 +1,6 @@
 // File: nesora-app/src/components/watch/WatchPlayer.tsx
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, AppState, Platform, Pressable, StyleSheet, Text, ToastAndroid, View } from "react-native";
 import { Image } from "expo-image";
 import { useEventListener } from "expo";
 import { useVideoPlayer, VideoView } from "expo-video";
@@ -8,10 +8,10 @@ import { HardDrive, Play, RotateCcw } from "lucide-react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import Button from "@/components/ui/Button";
 import { api } from "@/lib/api";
-import { formatDuration, formatStorage } from "@/lib/format";
+import { formatDuration, formatStorage, formatStorageDetailed } from "@/lib/format";
 import { openOnWeb } from "@/lib/handoff";
 import { publicStream, signedStream } from "@/lib/mux";
-import type { ConsentResult, HeartbeatResult, PlaybackSource, StartResult } from "@/lib/types";
+import type { ConsentResult, HeartbeatResult, Me, PlaybackSource, StartResult } from "@/lib/types";
 
 // The same flow as the website player (component/watch/WatchPlayer.tsx):
 //   tap Play → free minute (or the trailer) → "Continue watching?" → Yes →
@@ -52,12 +52,52 @@ export default function WatchPlayer(props: Props) {
   const [resumeAt, setResumeAt] = useState<number | null>(resumePositions.get(videoId) ?? null);
 
   const stageRef = useRef<Stage>("idle");
+  const videoViewRef = useRef<VideoView>(null);
+  const isFullscreen = useRef(false);
+  const balanceRef = useRef(props.initialBalanceMicroMb);
   const sessionId = useRef<string | null>(null);
   const mode = useRef<"FIRST_MINUTE" | "TRAILER" | null>(null);
   const seq = useRef(0);
   const played = useRef(0);
   const heartbeatSec = useRef(15);
   const tokenExpiresAt = useRef(0);
+
+  function showStorageWarning(text: string) {
+    if (Platform.OS === "android") {
+      try {
+        ToastAndroid.show(text, ToastAndroid.LONG);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  const exitFullscreen = useCallback(() => {
+    try {
+      videoViewRef.current?.exitFullscreen();
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const updateBalance = useCallback(
+    (newBalance: string) => {
+      balanceRef.current = newBalance;
+      setBalance(newBalance);
+      queryClient.setQueryData<Me>(["me"], (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          storage: {
+            balanceMicroMb: newBalance,
+            label: formatStorage(newBalance),
+          },
+        };
+      });
+      queryClient.invalidateQueries({ queryKey: ["storage"] });
+    },
+    [queryClient]
+  );
 
   const player = useVideoPlayer(null, (p) => {
     p.timeUpdateEventInterval = 0.5;
@@ -75,8 +115,13 @@ export default function WatchPlayer(props: Props) {
     const id = sessionId.current;
     if (!id) return;
     sessionId.current = null;
-    api("/playback/end", { method: "POST", body: { sessionId: id } }).catch(() => {});
-  }, []);
+    api("/playback/end", { method: "POST", body: { sessionId: id } })
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: ["me"] });
+        queryClient.invalidateQueries({ queryKey: ["storage"] });
+      })
+      .catch(() => {});
+  }, [queryClient]);
 
   // Leaving the screen ends the session (unused prepaid seconds are refunded).
   useEffect(() => endSession, [endSession]);
@@ -95,7 +140,9 @@ export default function WatchPlayer(props: Props) {
     try {
       const result = await api<ConsentResult>("/playback/consent", { method: "POST", body: { sessionId: id } });
       if (result.state === "insufficient") {
-        setBalance(result.balanceMicroMb);
+        updateBalance(result.balanceMicroMb);
+        exitFullscreen();
+        showStorageWarning("⚠️ You are out of storage space. Top up on nesora.org to continue.");
         go("insufficient");
         return;
       }
@@ -105,10 +152,13 @@ export default function WatchPlayer(props: Props) {
         return;
       }
       heartbeatSec.current = result.heartbeatSec;
-      setBalance(result.balanceMicroMb);
+      updateBalance(result.balanceMicroMb);
       seq.current = 0;
       played.current = 0;
       go("paid");
+      showStorageWarning(
+        `⚠️ Storage space is now being consumed (${props.ratePerMinLabel}/min · around ${props.pricePerHourLabel}/hr)`
+      );
       await playSource(result.source, at ?? result.startAt);
     } catch {
       setError("Couldn't continue. Check your connection and try again.");
@@ -172,15 +222,21 @@ export default function WatchPlayer(props: Props) {
   useEventListener(player, "timeUpdate", ({ currentTime }) => {
     // Backstop for the server-side clip: stop exactly at the end of the free minute.
     if (stageRef.current === "preview" && mode.current === "FIRST_MINUTE" && currentTime >= freeSec - 0.25) {
+      exitFullscreen();
       player.pause();
       go("prompt");
+      showStorageWarning("⚠️ Free preview ended. Storage space will be required to continue watching.");
     }
   });
 
   useEventListener(player, "playToEnd", () => {
     const s = stageRef.current;
-    if (s === "preview") go("prompt");
-    else if (s === "paid" || s === "free") {
+    if (s === "preview") {
+      exitFullscreen();
+      go("prompt");
+      showStorageWarning("⚠️ Free preview ended. Storage space will be required to continue watching.");
+    } else if (s === "paid" || s === "free") {
+      exitFullscreen();
       remember(null);
       endSession();
       go("finished");
@@ -191,6 +247,8 @@ export default function WatchPlayer(props: Props) {
   // (e.g. after buying storage), pick up automatically.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
+      // Do not pause playback when transitioning to/from native fullscreen
+      if (isFullscreen.current) return;
       if (state !== "active") {
         player.pause();
         return;
@@ -208,7 +266,10 @@ export default function WatchPlayer(props: Props) {
     if (stage !== "paid") return;
 
     const tick = setInterval(() => {
-      if (player.playing && player.status === "readyToPlay" && AppState.currentState === "active") played.current += 1;
+      const activeOrFullscreen = AppState.currentState === "active" || isFullscreen.current;
+      if (player.playing && player.status === "readyToPlay" && activeOrFullscreen) {
+        played.current += 1;
+      }
     }, 1000);
 
     const beat = setInterval(async () => {
@@ -225,12 +286,17 @@ export default function WatchPlayer(props: Props) {
         played.current = Math.max(0, played.current - playedSec);
 
         if (result.state === "ok") {
-          setBalance(result.balanceMicroMb);
+          updateBalance(result.balanceMicroMb);
+          if (isFullscreen.current) {
+            showStorageWarning(`⚠️ Consuming space: ${formatStorageDetailed(result.balanceMicroMb)} remaining`);
+          }
           if (result.source) await playSource(result.source, player.currentTime); // fresh short-lived token
         } else if (result.state === "insufficient") {
           player.pause();
-          setBalance(result.balanceMicroMb);
+          updateBalance(result.balanceMicroMb);
           remember(player.currentTime);
+          exitFullscreen();
+          showStorageWarning("⚠️ You are out of storage space. Top up on nesora.org to continue.");
           go("insufficient");
         } else {
           // Session was settled (e.g. a long pause). Start a new one where we are.
@@ -253,12 +319,16 @@ export default function WatchPlayer(props: Props) {
 
   const videoVisible = stage === "preview" || stage === "paid" || stage === "free" || stage === "prompt" || stage === "insufficient";
   const controls = stage === "preview" || stage === "paid" || stage === "free";
+  const isTall = stage === "prompt" || stage === "insufficient" || stage === "error";
 
   return (
-    // A 16:9 box is too short on phones for the prompt cards, so it grows while one shows.
-    <View style={[styles.player, (stage === "prompt" || stage === "insufficient" || stage === "error") && styles.playerTall]}>
+    // On phones, the prompt card needs a taller box, but we avoid overriding `aspectRatio`
+    // with `undefined` on the same style, because React Native's Yoga does not unset aspect-ratio
+    // when `undefined` is passed, causing width = minHeight * 16/9 = 533px (overflowing screens).
+    <View style={[styles.player, isTall ? styles.playerTall : styles.player169]}>
       {videoVisible ? (
         <VideoView
+          ref={videoViewRef}
           player={player}
           style={StyleSheet.absoluteFill}
           contentFit="contain"
@@ -266,6 +336,17 @@ export default function WatchPlayer(props: Props) {
           fullscreenOptions={{ enable: controls }}
           allowsPictureInPicture={false}
           surfaceType="textureView"
+          onFullscreenEnter={() => {
+            isFullscreen.current = true;
+            if (stageRef.current === "paid") {
+              showStorageWarning(
+                `⚠️ Storage space is being consumed (${props.ratePerMinLabel}/min) · ${formatStorageDetailed(balanceRef.current)} left`
+              );
+            }
+          }}
+          onFullscreenExit={() => {
+            isFullscreen.current = false;
+          }}
         />
       ) : posterUrl ? (
         <Image source={{ uri: posterUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
@@ -274,6 +355,14 @@ export default function WatchPlayer(props: Props) {
       {stage === "preview" ? (
         <View style={styles.badge} pointerEvents="none">
           <Text style={styles.badgeText}>{mode.current === "TRAILER" ? "Trailer · free" : `Free preview · ${formatDuration(freeSec)}`}</Text>
+        </View>
+      ) : null}
+
+      {stage === "paid" ? (
+        <View style={styles.consumingBadge} pointerEvents="none">
+          <View style={styles.consumingDot} />
+          <HardDrive size={13} color="#f59e0b" />
+          <Text style={styles.consumingBadgeText}>Space consuming · {formatStorageDetailed(balance)} left</Text>
         </View>
       ) : null}
 
@@ -363,25 +452,47 @@ function Balance({ value }: { value: string }) {
   return (
     <View style={styles.balance}>
       <HardDrive size={15} color="#e8834a" />
-      <Text style={styles.balanceText}>You have {formatStorage(value)}</Text>
+      <Text style={styles.balanceText}>You have {formatStorageDetailed(value)}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  player: { width: "100%", aspectRatio: 16 / 9, backgroundColor: "#000" },
-  playerTall: { aspectRatio: undefined, minHeight: 300 },
+  player: { width: "100%", maxWidth: "100%", backgroundColor: "#000", overflow: "hidden" },
+  player169: { aspectRatio: 16 / 9 },
+  playerTall: { minHeight: 280 },
   badge: { position: "absolute", left: 10, top: 10, backgroundColor: "rgba(0,0,0,0.65)", borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4 },
   badgeText: { color: "#fff", fontSize: 12, fontWeight: "600" },
-  overlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", gap: 10, padding: 16 },
+  consumingBadge: {
+    position: "absolute",
+    left: 10,
+    top: 10,
+    backgroundColor: "rgba(18, 18, 18, 0.88)",
+    borderColor: "rgba(245, 158, 11, 0.6)",
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  consumingDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: "#f59e0b",
+  },
+  consumingBadgeText: { color: "#f59e0b", fontSize: 12, fontWeight: "600" },
+  overlay: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", gap: 10, paddingHorizontal: 16, paddingVertical: 12 },
   dim: { backgroundColor: "rgba(0,0,0,0.72)" },
   play: { width: 68, height: 68, borderRadius: 34, backgroundColor: "rgba(0,0,0,0.6)", alignItems: "center", justifyContent: "center" },
   hint: { color: "#fff", fontSize: 13, fontWeight: "600", textShadowColor: "rgba(0,0,0,0.7)", textShadowRadius: 3 },
-  card: { width: "100%", maxWidth: 420, backgroundColor: "#212121", borderRadius: 14, padding: 14, gap: 8 },
+  card: { width: "100%", maxWidth: 400, backgroundColor: "#212121", borderRadius: 14, padding: 14, gap: 8, alignSelf: "center" },
   cardTitle: { color: "#fff", fontSize: 17, fontWeight: "700" },
-  cardText: { color: "#d0d0d0", fontSize: 13, lineHeight: 18 },
+  cardText: { color: "#d0d0d0", fontSize: 13, lineHeight: 18, flexShrink: 1 },
   balance: { flexDirection: "row", alignItems: "center", gap: 6 },
   balanceText: { color: "#fff", fontSize: 13, fontWeight: "600" },
-  cardActions: { flexDirection: "row", justifyContent: "flex-end", gap: 8, marginTop: 4 },
+  cardActions: { flexDirection: "row", justifyContent: "flex-end", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" },
   error: { color: "#fff", textAlign: "center" },
 });
