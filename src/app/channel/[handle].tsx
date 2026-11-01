@@ -74,7 +74,7 @@ export default function ChannelScreen() {
             <ShortsShelf shorts={shorts} title="Shorts" />
           </View>
         ) : (
-          <EmptyState title="No Shorts yet" text={channel.isOwn ? "Clips of 1:30 or less are posted as Shorts." : "This channel hasn't posted any Shorts yet."} />
+          <EmptyState title="No Shorts yet" text={channel.isOwn ? "Clips of 5 minutes or less are posted as Shorts." : "This channel hasn't posted any Shorts yet."} />
         )
       ) : null}
     </View>

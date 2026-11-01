@@ -2,7 +2,7 @@
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Ban, Bell, ChevronRight, Clapperboard, FileText, HardDrive, History, LifeBuoy, LogOut, Scale, Shield } from "lucide-react-native";
+import { Ban, Bell, ChevronRight, Clapperboard, FileText, HardDrive, History, LifeBuoy, LogOut, Scale, Shield, Trash2 } from "lucide-react-native";
 import Avatar from "@/components/ui/Avatar";
 import Button from "@/components/ui/Button";
 import { useMe } from "@/hooks/use-me";
@@ -45,7 +45,7 @@ export default function YouScreen() {
           onPress: async () => {
             try {
               await api("/me/delete", { method: "POST" });
-              await authClient.signOut().catch(() => {});
+              await doSignOut();
             } catch (e) {
               Alert.alert("Couldn't delete your account", e instanceof ApiError ? e.message : "Try again.");
             }
@@ -156,14 +156,40 @@ export default function YouScreen() {
         </View>
       </View>
 
-      <Pressable onPress={signOut} style={({ pressed }) => [styles.row, styles.signOut, { opacity: pressed ? 0.6 : 1 }]} accessibilityRole="button">
-        <LogOut size={22} color={colors.danger} />
-        <Text style={[styles.rowTitle, { color: colors.danger }]}>Sign out</Text>
-      </Pressable>
+      {!me ? (
+        <View style={styles.section}>
+          <Button
+            title="Sign in or Create account"
+            variant="primary"
+            onPress={() => router.push("/login")}
+          />
+        </View>
+      ) : (
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>Account</Text>
+          <View style={[styles.list, { borderColor: colors.border }]}>
+            <Pressable
+              onPress={signOut}
+              style={({ pressed }) => [styles.row, { opacity: pressed ? 0.6 : 1 }]}
+              accessibilityRole="button"
+            >
+              <LogOut size={22} color={colors.text} />
+              <Text style={[styles.rowTitle, styles.rowText, { color: colors.text }]}>Sign out</Text>
+              <ChevronRight size={20} color={colors.muted} />
+            </Pressable>
 
-      <Pressable onPress={deleteAccount} accessibilityRole="button" hitSlop={8}>
-        <Text style={[styles.delete, { color: colors.muted }]}>Delete account</Text>
-      </Pressable>
+            <Pressable
+              onPress={deleteAccount}
+              style={({ pressed }) => [styles.row, { opacity: pressed ? 0.6 : 1 }]}
+              accessibilityRole="button"
+            >
+              <Trash2 size={22} color={colors.danger} />
+              <Text style={[styles.rowTitle, styles.rowText, { color: colors.danger }]}>Delete account</Text>
+              <ChevronRight size={20} color={colors.danger} />
+            </Pressable>
+          </View>
+        </View>
+      )}
     </ScrollView>
   );
 }
