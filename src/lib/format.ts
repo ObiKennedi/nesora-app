@@ -60,7 +60,7 @@ export function formatStorage(microMb: string | number) {
   if (mb >= 1000) {
     const gb = mb / 1000;
     if (mb % 1000 === 0) return `${gb} GB`;
-    return `${gb.toFixed(3).replace(/0+$/, "")} GB (${Math.floor(mb).toLocaleString()} MB)`;
+    return `${gb.toFixed(3).replace(/\.?0+$/, "")} GB (${mb.toLocaleString("en-NG", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} MB)`;
   }
   if (mb >= 10) return `${mb.toFixed(1).replace(/\.0$/, "")} MB`;
   return `${mb.toFixed(2).replace(/\.?0+$/, "")} MB`;
@@ -70,7 +70,7 @@ export function formatStorageDetailed(microMb: string | number) {
   const mb = Number(microMb) / MICRO_PER_MB;
   if (mb >= 1000) {
     const gb = mb / 1000;
-    return `${gb.toFixed(3)} GB (${Math.floor(mb)} MB)`;
+    return `${gb.toFixed(3).replace(/\.?0+$/, "")} GB (${mb.toLocaleString("en-NG", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} MB)`;
   }
   if (mb >= 10) return `${mb.toFixed(1)} MB`;
   return `${mb.toFixed(2)} MB`;

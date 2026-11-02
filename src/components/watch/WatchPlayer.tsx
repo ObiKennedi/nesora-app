@@ -393,7 +393,7 @@ export default function WatchPlayer(props: Props) {
 
       {stage === "preview" ? (
         <View style={styles.badge} pointerEvents="none">
-          <Text style={styles.badgeText}>{mode.current === "TRAILER" ? "Trailer · free" : `Free preview · ${formatDuration(freeSec)}`}</Text>
+          <Text style={styles.badgeText}>{mode.current === "TRAILER" ? "Trailer · free" : `Free preview · ${formatDuration(freeSec)} (no space used)`}</Text>
         </View>
       ) : null}
 
