@@ -1,5 +1,5 @@
-// File: nesora-app/src/lib/format.ts
-// Same display helpers as the website (lib/format.ts there).
+// Display helpers shared across screens. Kept identical to the website's
+// lib/format.ts so numbers format the same everywhere.
 
 export function formatDuration(totalSeconds: number | null | undefined) {
   if (!totalSeconds || totalSeconds < 0) return "";
@@ -56,9 +56,14 @@ const MICRO_PER_MB = 1_000_000;
 /** Storage arrives in µMB as a string (1 GB = 1,000 MB), same formatting as the website. */
 export function formatStorage(microMb: string | number) {
   const mb = Number(microMb) / MICRO_PER_MB;
-  if (mb >= 1000) return `${(mb / 1000).toFixed(mb >= 10_000 ? 1 : 2).replace(/\.?0+$/, "")} GB`;
-  if (mb >= 10) return `${Math.floor(mb)} MB`;
-  return `${mb.toFixed(2).replace(/\.?0+$/, "") || "0"} MB`;
+  if (mb <= 0) return "0 MB";
+  if (mb >= 1000) {
+    const gb = mb / 1000;
+    if (mb % 1000 === 0) return `${gb} GB`;
+    return `${gb.toFixed(3).replace(/0+$/, "")} GB (${Math.floor(mb).toLocaleString()} MB)`;
+  }
+  if (mb >= 10) return `${mb.toFixed(1).replace(/\.0$/, "")} MB`;
+  return `${mb.toFixed(2).replace(/\.?0+$/, "")} MB`;
 }
 
 export function formatStorageDetailed(microMb: string | number) {
@@ -69,5 +74,4 @@ export function formatStorageDetailed(microMb: string | number) {
   }
   if (mb >= 10) return `${mb.toFixed(1)} MB`;
   return `${mb.toFixed(2)} MB`;
-
 }
