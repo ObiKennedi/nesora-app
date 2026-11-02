@@ -4,7 +4,7 @@ import { ActivityIndicator, AppState, Platform, Pressable, StyleSheet, Text, Toa
 import { Image } from "expo-image";
 import { useEventListener } from "expo";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { HardDrive, Play, RotateCcw } from "lucide-react-native";
+import { Check, HardDrive, Play, RotateCcw, Settings } from "lucide-react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import Button from "@/components/ui/Button";
 import { api } from "@/lib/api";
@@ -12,6 +12,15 @@ import { formatDuration, formatStorage, formatStorageDetailed } from "@/lib/form
 import { openOnWeb } from "@/lib/handoff";
 import { publicStream, signedStream } from "@/lib/mux";
 import type { ConsentResult, HeartbeatResult, Me, PlaybackSource, StartResult } from "@/lib/types";
+
+export type QualityOption = "auto" | "1080p" | "720p" | "360p";
+
+const QUALITY_LABELS: Record<QualityOption, string> = {
+  auto: "Auto (Recommended)",
+  "1080p": "1080p (Full HD)",
+  "720p": "720p (HD)",
+  "360p": "360p (Data Saver)",
+};
 
 // The same flow as the website player (component/watch/WatchPlayer.tsx):
 //   tap Play → free minute (or the trailer) → "Continue watching?" → Yes →
@@ -51,6 +60,8 @@ export default function WatchPlayer(props: Props) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [resumeAt, setResumeAt] = useState<number | null>(resumePositions.get(videoId) ?? null);
+  const [quality, setQuality] = useState<QualityOption>("auto");
+  const [qualitySheetOpen, setQualitySheetOpen] = useState(false);
 
   const stageRef = useRef<Stage>("idle");
   const videoViewRef = useRef<VideoView>(null);
@@ -127,9 +138,36 @@ export default function WatchPlayer(props: Props) {
   // Leaving the screen ends the session (unused prepaid seconds are refunded).
   useEffect(() => endSession, [endSession]);
 
+  const applyQuality = useCallback(
+    (targetQuality: QualityOption) => {
+      try {
+        if (targetQuality === "auto") {
+          player.maxResolution = null;
+        } else if (targetQuality === "1080p") {
+          player.maxResolution = { width: 1920, height: 1080 };
+        } else if (targetQuality === "720p") {
+          player.maxResolution = { width: 1280, height: 720 };
+        } else if (targetQuality === "360p") {
+          player.maxResolution = { width: 640, height: 360 };
+        }
+      } catch {
+        // ignore
+      }
+    },
+    [player]
+  );
+
+  function handleSelectQuality(q: QualityOption) {
+    setQuality(q);
+    applyQuality(q);
+    setQualitySheetOpen(false);
+    showStorageWarning(`Quality set to ${q === "auto" ? "Auto" : q}`);
+  }
+
   async function playSource(next: PlaybackSource, at: number) {
     if (next.kind === "video") tokenExpiresAt.current = next.tokenExpiresAt;
     await player.replaceAsync({ uri: sourceUrl(next) });
+    applyQuality(quality);
     if (at > 0) player.currentTime = at;
     player.play();
   }
@@ -373,6 +411,17 @@ export default function WatchPlayer(props: Props) {
         </View>
       ) : null}
 
+      <Pressable
+        style={styles.qualityBtn}
+        onPress={() => setQualitySheetOpen(true)}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Change video quality"
+      >
+        <Settings size={13} color="#fff" />
+        <Text style={styles.qualityBtnText}>{quality === "auto" ? "Auto" : quality}</Text>
+      </Pressable>
+
       {(stage === "idle" || stage === "loading" || stage === "finished") && (
         <View style={styles.overlay}>
           <Pressable
@@ -453,6 +502,37 @@ export default function WatchPlayer(props: Props) {
         </View>
       )}
 
+      {qualitySheetOpen ? (
+        <Pressable style={styles.qualityBackdrop} onPress={() => setQualitySheetOpen(false)}>
+          <Pressable style={styles.qualitySheet} onPress={(e) => e.stopPropagation()}>
+            <Text style={styles.qualitySheetTitle}>Video Quality</Text>
+            {(["auto", "1080p", "720p", "360p"] as QualityOption[]).map((q) => (
+              <Pressable
+                key={q}
+                style={[styles.qualityOption, quality === q && styles.qualityOptionActive]}
+                onPress={() => handleSelectQuality(q)}
+              >
+                <View style={styles.qualityOptionTextGroup}>
+                  <Text style={[styles.qualityOptionTitle, quality === q && styles.qualityOptionTitleActive]}>
+                    {QUALITY_LABELS[q]}
+                  </Text>
+                  <Text style={styles.qualityOptionSub}>
+                    {q === "auto"
+                      ? "Automatically adapts to your network"
+                      : q === "1080p"
+                        ? "Crispest picture, higher data usage"
+                        : q === "720p"
+                          ? "High definition, balanced data"
+                          : "Saves mobile data and storage"}
+                  </Text>
+                </View>
+                {quality === q ? <Check size={18} color="#f59e0b" /> : null}
+              </Pressable>
+            ))}
+          </Pressable>
+        </Pressable>
+      ) : null}
+
     </View>
   );
 }
@@ -504,4 +584,79 @@ const styles = StyleSheet.create({
   balanceText: { color: "#fff", fontSize: 13, fontWeight: "600" },
   cardActions: { flexDirection: "row", justifyContent: "flex-end", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" },
   error: { color: "#fff", textAlign: "center" },
+  qualityBtn: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "rgba(0, 0, 0, 0.65)",
+    paddingVertical: 5,
+    paddingHorizontal: 9,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.2)",
+    zIndex: 10,
+  },
+  qualityBtnText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  qualityBackdrop: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0, 0, 0, 0.78)",
+    justifyContent: "flex-end",
+    zIndex: 30,
+  },
+  qualitySheet: {
+    backgroundColor: "#18181b",
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    gap: 6,
+  },
+  qualitySheetTitle: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  qualityOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: "rgba(255, 255, 255, 0.04)",
+  },
+  qualityOptionActive: {
+    backgroundColor: "rgba(245, 158, 11, 0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(245, 158, 11, 0.4)",
+  },
+  qualityOptionTextGroup: {
+    flex: 1,
+    marginRight: 10,
+  },
+  qualityOptionTitle: {
+    color: "#e4e4e7",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  qualityOptionTitleActive: {
+    color: "#f59e0b",
+  },
+  qualityOptionSub: {
+    color: "#a1a1aa",
+    fontSize: 11,
+    marginTop: 1,
+  },
 });
