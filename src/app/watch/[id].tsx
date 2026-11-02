@@ -34,6 +34,7 @@ export default function WatchScreen() {
           durationSec={watch.data.video.durationSec}
           hasTrailer={watch.data.video.hasTrailer}
           isFree={watch.data.pricing.isFree}
+          isPaidWatch={watch.data.pricing.isPaidWatch}
           freeSec={watch.data.pricing.freePreviewSec}
           ratePerMinLabel={watch.data.pricing.ratePerMinLabel}
           pricePerHourLabel={watch.data.pricing.pricePerHourLabel}

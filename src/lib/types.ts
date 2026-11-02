@@ -95,7 +95,13 @@ export type WatchVideo = FeedVideo & {
 
 export type WatchResponse = {
   video: WatchVideo;
-  pricing: { isFree: boolean; freePreviewSec: number; ratePerMinLabel: string; pricePerHourLabel: string };
+  pricing: {
+    isFree: boolean;
+    isPaidWatch?: boolean;
+    freePreviewSec: number;
+    ratePerMinLabel: string;
+    pricePerHourLabel: string;
+  };
   storage: { balanceMicroMb: string; label: string };
 };
 

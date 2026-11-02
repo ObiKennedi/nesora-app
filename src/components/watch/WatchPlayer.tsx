@@ -24,6 +24,7 @@ type Props = {
   durationSec: number | null;
   hasTrailer: boolean;
   isFree: boolean;
+  isPaidWatch?: boolean;
   freeSec: number;
   ratePerMinLabel: string;
   pricePerHourLabel: string;
@@ -42,7 +43,7 @@ function sourceUrl(source: PlaybackSource) {
 }
 
 export default function WatchPlayer(props: Props) {
-  const { videoId, posterUrl, durationSec, hasTrailer, isFree, freeSec } = props;
+  const { videoId, posterUrl, durationSec, hasTrailer, isFree, isPaidWatch, freeSec } = props;
   const queryClient = useQueryClient();
 
   const [stage, setStage] = useState<Stage>("idle");
@@ -358,6 +359,12 @@ export default function WatchPlayer(props: Props) {
         </View>
       ) : null}
 
+      {stage === "free" && isPaidWatch ? (
+        <View style={styles.badge} pointerEvents="none">
+          <Text style={styles.badgeText}>Purchased · Free rewatch</Text>
+        </View>
+      ) : null}
+
       {stage === "paid" ? (
         <View style={styles.consumingBadge} pointerEvents="none">
           <View style={styles.consumingDot} />
@@ -386,13 +393,15 @@ export default function WatchPlayer(props: Props) {
           <Text style={styles.hint}>
             {stage === "loading"
               ? "Loading…"
-              : isFree
-                ? `Free · ${formatDuration(durationSec)}`
-                : hasTrailer
-                  ? `Trailer first · ${formatDuration(durationSec)}`
-                  : `First minute free · ${formatDuration(durationSec)}`}
+              : isPaidWatch
+                ? `Purchased · Free to rewatch · ${formatDuration(durationSec)}`
+                : isFree
+                  ? `Free · ${formatDuration(durationSec)}`
+                  : hasTrailer
+                    ? `Trailer first · ${formatDuration(durationSec)}`
+                    : `First minute free · ${formatDuration(durationSec)}`}
           </Text>
-          {stage === "idle" && resumeAt && !isFree ? (
+          {stage === "idle" && resumeAt && (!isFree || isPaidWatch) ? (
             <Button title={`Resume from ${formatDuration(resumeAt)}`} size="sm" onPress={() => start({ resumeFrom: resumeAt })} />
           ) : null}
         </View>
