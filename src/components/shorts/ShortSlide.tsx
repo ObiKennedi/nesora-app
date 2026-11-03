@@ -52,6 +52,7 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
   const queryClient = useQueryClient();
   const [userPaused, setUserPaused] = useState(false);
   const [insufficient, setInsufficient] = useState(false);
+  const [hasRendered, setHasRendered] = useState(false);
   const viewed = useRef(false);
 
   // Metering session state
@@ -85,6 +86,14 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
     },
     [queryClient],
   );
+
+  useEffect(() => {
+    if (isPlaying) setHasRendered(true);
+  }, [isPlaying]);
+
+  useEffect(() => {
+    if (!active) setHasRendered(false);
+  }, [active]);
 
   useEffect(() => {
     player.muted = muted;
@@ -259,6 +268,11 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
         nativeControls={false}
         surfaceType="textureView"
       />
+      {short.thumbnailUrl && !hasRendered ? (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+          <Image source={{ uri: short.thumbnailUrl }} style={StyleSheet.absoluteFill} contentFit="cover" />
+        </View>
+      ) : null}
       {!isPlaying && !userPaused && active && status === "loading" ? (
         <View style={styles.loadingCenter} pointerEvents="none">
           <ActivityIndicator color="#fff" size="small" />
