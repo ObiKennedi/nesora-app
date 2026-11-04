@@ -403,13 +403,7 @@ export default function WatchPlayer(props: Props) {
         </View>
       ) : null}
 
-      {stage === "paid" ? (
-        <View style={styles.consumingBadge} pointerEvents="none">
-          <View style={styles.consumingDot} />
-          <HardDrive size={13} color="#f59e0b" />
-          <Text style={styles.consumingBadgeText}>Space consuming · {formatStorageDetailed(balance)} left</Text>
-        </View>
-      ) : null}
+      
 
       <Pressable
         style={styles.qualityBtn}
