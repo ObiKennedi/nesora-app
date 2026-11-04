@@ -63,6 +63,18 @@ export default function WatchPlayer(props: Props) {
   const [quality, setQuality] = useState<QualityOption>("auto");
   const [qualitySheetOpen, setQualitySheetOpen] = useState(false);
 
+  const [seekBadge, setSeekBadge] = useState<null | { dir: "rewind" | "forward"; seconds: number }>(null);
+  const seekTimer = useRef<NodeJS.Timeout | null>(null);
+  const lastTapTime = useRef(0);
+
+  const seekBy = useCallback((seconds: number) => {
+    const dur = player.duration || durationSec || 1000;
+    const next = Math.max(0, Math.min(dur, player.currentTime + seconds));
+    player.currentTime = next;
+    setSeekBadge({ dir: seconds > 0 ? "forward" : "rewind", seconds: Math.abs(seconds) });
+    if (seekTimer.current) clearTimeout(seekTimer.current);
+    seekTimer.current = setTimeout(() => setSeekBadge(null), 700);
+  }, [player, durationSec]);
   const stageRef = useRef<Stage>("idle");
   const videoViewRef = useRef<VideoView>(null);
   const isFullscreen = useRef(false);
@@ -423,6 +435,13 @@ export default function WatchPlayer(props: Props) {
 
       
 
+            {seekBadge ? (
+        <View style={[styles.seekBadge, seekBadge.dir === "rewind" ? styles.seekBadgeLeft : styles.seekBadgeRight]} pointerEvents="none">
+          {seekBadge.dir === "rewind" ? <RotateCcw size={30} color="#fff" /> : <RotateCw size={30} color="#fff" />}
+          <Text style={styles.seekBadgeText}>{seekBadge.seconds}s</Text>
+        </View>
+      ) : null}
+
       <Pressable
         style={styles.qualityBtn}
         onPress={() => setQualitySheetOpen(true)}
@@ -670,5 +689,29 @@ const styles = StyleSheet.create({
     color: "#a1a1aa",
     fontSize: 11,
     marginTop: 1,
+  },
+  seekBadge: {
+    position: "absolute",
+    top: "50%",
+    marginTop: -38,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: "rgba(0,0,0,0.72)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 35,
+  },
+  seekBadgeLeft: {
+    left: 40,
+  },
+  seekBadgeRight: {
+    right: 40,
+  },
+  seekBadgeText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 2,
   },
 });

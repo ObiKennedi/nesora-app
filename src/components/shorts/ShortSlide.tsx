@@ -6,7 +6,7 @@ import { Image } from "expo-image";
 import { useEvent } from "expo";
 import { useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { EllipsisVertical, MessageSquareText, Play, Share2, ThumbsUp, Volume2, VolumeX } from "lucide-react-native";
+import { EllipsisVertical, MessageSquareText, Play, RotateCcw, RotateCw, Share2, ThumbsUp, Volume2, VolumeX } from "lucide-react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import CommentsSheet from "@/components/comments/CommentsSheet";
 import SubscribeButton from "@/components/feed/SubscribeButton";
@@ -54,6 +54,50 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
   const [insufficient, setInsufficient] = useState(false);
   const [hasRendered, setHasRendered] = useState(false);
   const viewed = useRef(false);
+  // Scrubber & Double-tap Seek state
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [seekBadge, setSeekBadge] = useState<null | { dir: "rewind" | "forward"; seconds: number }>(null);
+  const seekTimer = useRef<NodeJS.Timeout | null>(null);
+  const lastTapTime = useRef(0);
+  const singleTapTimer = useRef<NodeJS.Timeout | null>(null);
+
+  const seekBy = useCallback((seconds: number) => {
+    const dur = player.duration || 60;
+    const next = Math.max(0, Math.min(dur, player.currentTime + seconds));
+    player.currentTime = next;
+    setCurrentTime(next);
+    setSeekBadge({ dir: seconds > 0 ? "forward" : "rewind", seconds: Math.abs(seconds) });
+    if (seekTimer.current) clearTimeout(seekTimer.current);
+    seekTimer.current = setTimeout(() => setSeekBadge(null), 700);
+  }, [player]);
+
+  const handlePress = useCallback((e: any) => {
+    if (insufficient) return;
+    const now = Date.now();
+    const x = e.nativeEvent?.locationX || 0;
+    // Assume screen width ~380
+    if (now - lastTapTime.current < 320) {
+      if (singleTapTimer.current) {
+        clearTimeout(singleTapTimer.current);
+        singleTapTimer.current = null;
+      }
+      if (x < 150) {
+        seekBy(-10);
+      } else if (x > 230) {
+        seekBy(10);
+      } else {
+        seekBy(10);
+      }
+    } else {
+      lastTapTime.current = now;
+      singleTapTimer.current = setTimeout(() => {
+        setUserPaused((p) => !p);
+        singleTapTimer.current = null;
+      }, 260);
+    }
+  }, [insufficient, seekBy]);
+
 
   // Metering session state
   const sessionId = useRef<string | null>(null);
@@ -171,6 +215,8 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
     const timer = setInterval(async () => {
       if (!player.playing) return;
       playedSec.current += 1;
+      setCurrentTime(player.currentTime);
+      if (player.duration) setDuration(player.duration);
 
       if (stage.current === "preview" && playedSec.current >= 60) {
         const id = sessionId.current;
@@ -258,7 +304,7 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
   return (
     <Pressable
       style={StyleSheet.absoluteFill}
-      onPress={() => !insufficient && setUserPaused((p) => !p)}
+      onPress={handlePress}
       accessibilityLabel={isPlaying ? "Pause" : "Play"}
     >
       <VideoView
@@ -296,6 +342,30 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
           />
         </View>
       ) : null}
+      {/* Double-tap Seek Feedback */}
+      {seekBadge ? (
+        <View style={[styles.seekBadge, seekBadge.dir === "rewind" ? styles.seekBadgeLeft : styles.seekBadgeRight]} pointerEvents="none">
+          {seekBadge.dir === "rewind" ? <RotateCcw size={28} color="#fff" /> : <RotateCw size={28} color="#fff" />}
+          <Text style={styles.seekBadgeText}>{seekBadge.seconds}s</Text>
+        </View>
+      ) : null}
+
+      {/* Progress / Scrubber Bar at Bottom */}
+      <View
+        style={styles.scrubberBar}
+        onTouchStart={(e) => {
+          const x = e.nativeEvent.locationX;
+          // Approximate width ~360
+          const ratio = Math.max(0, Math.min(1, x / 360));
+          const dur = player.duration || duration || 60;
+          player.currentTime = ratio * dur;
+          setCurrentTime(ratio * dur);
+        }}
+      >
+        <View style={styles.scrubberTrack}>
+          <View style={[styles.scrubberFill, { width: `${duration > 0 ? (currentTime / duration) * 100 : 0}%` }]} />
+        </View>
+      </View>
     </Pressable>
   );
 }
@@ -431,4 +501,45 @@ const styles = StyleSheet.create({
   action: { alignItems: "center", gap: 4, width: 64 },
   actionIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: "rgba(255,255,255,0.12)", alignItems: "center", justifyContent: "center" },
   actionLabel: { color: "#fff", fontSize: 12, fontWeight: "600", ...shadow },
+  scrubberBar: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 16,
+    justifyContent: "flex-end",
+    zIndex: 25,
+  },
+  scrubberTrack: {
+    height: 3,
+    backgroundColor: "rgba(255,255,255,0.25)",
+  },
+  scrubberFill: {
+    height: "100%",
+    backgroundColor: "#c2622a",
+  },
+  seekBadge: {
+    position: "absolute",
+    top: "50%",
+    marginTop: -38,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    backgroundColor: "rgba(0,0,0,0.72)",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 35,
+  },
+  seekBadgeLeft: {
+    left: 40,
+  },
+  seekBadgeRight: {
+    right: 40,
+  },
+  seekBadgeText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 2,
+  },
 });
