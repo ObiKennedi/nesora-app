@@ -74,6 +74,24 @@ export default function WatchPlayer(props: Props) {
   const heartbeatSec = useRef(15);
   const tokenExpiresAt = useRef(0);
 
+    function notifyFreeMinuteEnded() {
+    if (Platform.OS === "android") {
+      try {
+        ToastAndroid.show("⚠️ Your free 1 minute is up. Storage space is now required to continue watching.", ToastAndroid.LONG);
+      } catch {}
+    }
+
+    Alert.alert(
+      "Your Free Minute Is Up",
+      `Your free 1-minute preview has ended. To continue watching, storage space will now start calculating at ${props.ratePerMinLabel} of storage per minute.`,
+      [
+        { text: "Not now", style: "cancel", onPress: declineContinue },
+        { text: "Continue & start paying", style: "default", onPress: () => consent(null) },
+      ],
+      { cancelable: true }
+    );
+  }
+
   function showStorageWarning(text: string) {
     if (Platform.OS === "android") {
       try {
@@ -264,7 +282,7 @@ export default function WatchPlayer(props: Props) {
       exitFullscreen();
       player.pause();
       go("prompt");
-      showStorageWarning("⚠️ Free preview ended. Storage space will be required to continue watching.");
+      notifyFreeMinuteEnded();
     }
   });
 
@@ -273,7 +291,7 @@ export default function WatchPlayer(props: Props) {
     if (s === "preview") {
       exitFullscreen();
       go("prompt");
-      showStorageWarning("⚠️ Free preview ended. Storage space will be required to continue watching.");
+      notifyFreeMinuteEnded();
     } else if (s === "paid" || s === "free") {
       exitFullscreen();
       remember(null);
@@ -453,15 +471,15 @@ export default function WatchPlayer(props: Props) {
       {stage === "prompt" && (
         <View style={[styles.overlay, styles.dim]} accessibilityViewIsModal>
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Continue watching?</Text>
+            <Text style={styles.cardTitle}>Your free minute is up</Text>
             <Text style={styles.cardText}>
-              {mode.current === "TRAILER" ? "That was the trailer. " : "That was your free minute. "}
+              {mode.current === "TRAILER" ? "That was the trailer. " : "Your free 1-minute preview has ended. "}
               The full video uses about {props.ratePerMinLabel} of storage per minute (around {props.pricePerHourLabel} an hour).
             </Text>
             <Balance value={balance} />
             <View style={styles.cardActions}>
               <Button title="Not now" onPress={declineContinue} disabled={busy} size="sm" />
-              <Button title="Continue" variant="primary" onPress={() => consent(null)} loading={busy} size="sm" />
+              <Button title="Continue & start paying" variant="primary" onPress={() => consent(null)} loading={busy} size="sm" />
             </View>
           </View>
         </View>
