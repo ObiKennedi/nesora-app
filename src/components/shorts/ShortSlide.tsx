@@ -1,6 +1,6 @@
 // File: nesora-app/src/components/shorts/ShortSlide.tsx
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Pressable, Share, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, AppState, Dimensions, Pressable, Share, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { useEvent } from "expo";
@@ -63,38 +63,51 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
   const singleTapTimer = useRef<NodeJS.Timeout | null>(null);
 
   const seekBy = useCallback((seconds: number) => {
+    try {
+      player.seekBy(seconds);
+    } catch {
+      const dur = player.duration || 60;
+      const next = Math.max(0, Math.min(dur, player.currentTime + seconds));
+      player.currentTime = next;
+    }
     const dur = player.duration || 60;
     const next = Math.max(0, Math.min(dur, player.currentTime + seconds));
-    player.currentTime = next;
     setCurrentTime(next);
-    setSeekBadge({ dir: seconds > 0 ? "forward" : "rewind", seconds: Math.abs(seconds) });
+    setSeekBadge((prev) => ({
+      dir: seconds > 0 ? "forward" : "rewind",
+      seconds: prev && prev.dir === (seconds > 0 ? "forward" : "rewind") ? prev.seconds + Math.abs(seconds) : Math.abs(seconds),
+    }));
     if (seekTimer.current) clearTimeout(seekTimer.current);
-    seekTimer.current = setTimeout(() => setSeekBadge(null), 700);
+    seekTimer.current = setTimeout(() => setSeekBadge(null), 800);
   }, [player]);
 
   const handlePress = useCallback((e: any) => {
     if (insufficient) return;
     const now = Date.now();
-    const x = e.nativeEvent?.locationX || 0;
-    // Assume screen width ~380
-    if (now - lastTapTime.current < 320) {
+    const screenWidth = Dimensions.get("window").width || 380;
+    const x = e.nativeEvent?.pageX ?? e.nativeEvent?.locationX ?? (screenWidth / 2);
+    const diff = now - lastTapTime.current;
+
+    if (diff > 40 && diff < 420) {
       if (singleTapTimer.current) {
         clearTimeout(singleTapTimer.current);
         singleTapTimer.current = null;
       }
-      if (x < 150) {
+      lastTapTime.current = 0;
+      if (x < screenWidth * 0.42) {
         seekBy(-10);
-      } else if (x > 230) {
+      } else if (x > screenWidth * 0.58) {
         seekBy(10);
       } else {
         seekBy(10);
       }
     } else {
       lastTapTime.current = now;
+      if (singleTapTimer.current) clearTimeout(singleTapTimer.current);
       singleTapTimer.current = setTimeout(() => {
         setUserPaused((p) => !p);
         singleTapTimer.current = null;
-      }, 260);
+      }, 300);
     }
   }, [insufficient, seekBy]);
 
@@ -325,8 +338,18 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
         </View>
       ) : null}
       {!isPlaying && userPaused && !insufficient ? (
-        <View style={styles.paused} pointerEvents="none">
-          <Play size={56} color="#fff" fill="#fff" />
+        <View style={styles.pausedControls} pointerEvents="box-none">
+          <Pressable style={styles.pausedBtn} onPress={() => seekBy(-10)} hitSlop={12} accessibilityLabel="Rewind 10 seconds">
+            <RotateCcw size={22} color="#fff" />
+            <Text style={styles.pausedBtnText}>10s</Text>
+          </Pressable>
+          <Pressable style={styles.pausedBtnMain} onPress={() => setUserPaused(false)} hitSlop={12} accessibilityLabel="Play">
+            <Play size={40} color="#fff" fill="#fff" />
+          </Pressable>
+          <Pressable style={styles.pausedBtn} onPress={() => seekBy(10)} hitSlop={12} accessibilityLabel="Fast forward 10 seconds">
+            <RotateCw size={22} color="#fff" />
+            <Text style={styles.pausedBtnText}>10s</Text>
+          </Pressable>
         </View>
       ) : null}
       {insufficient ? (
@@ -354,12 +377,22 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
       <View
         style={styles.scrubberBar}
         onTouchStart={(e) => {
-          const x = e.nativeEvent.locationX;
-          // Approximate width ~360
-          const ratio = Math.max(0, Math.min(1, x / 360));
+          const screenWidth = Dimensions.get("window").width || 380;
+          const x = e.nativeEvent.pageX ?? e.nativeEvent.locationX;
+          const ratio = Math.max(0, Math.min(1, x / screenWidth));
           const dur = player.duration || duration || 60;
-          player.currentTime = ratio * dur;
-          setCurrentTime(ratio * dur);
+          const target = ratio * dur;
+          try { player.seekBy(target - player.currentTime); } catch { player.currentTime = target; }
+          setCurrentTime(target);
+        }}
+        onTouchMove={(e) => {
+          const screenWidth = Dimensions.get("window").width || 380;
+          const x = e.nativeEvent.pageX ?? e.nativeEvent.locationX;
+          const ratio = Math.max(0, Math.min(1, x / screenWidth));
+          const dur = player.duration || duration || 60;
+          const target = ratio * dur;
+          try { player.seekBy(target - player.currentTime); } catch { player.currentTime = target; }
+          setCurrentTime(target);
         }}
       >
         <View style={styles.scrubberTrack}>
@@ -463,6 +496,42 @@ const shadow = { textShadowColor: "rgba(0,0,0,0.6)", textShadowOffset: { width: 
 const styles = StyleSheet.create({
   slide: { width: "100%", backgroundColor: "#000", overflow: "hidden" },
   paused: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.2)" },
+  pausedControls: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 32,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    zIndex: 20,
+  },
+  pausedBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pausedBtnMain: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "rgba(0,0,0,0.75)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingLeft: 4,
+  },
+  pausedBtnText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "700",
+    marginTop: 2,
+  },
   loadingCenter: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" },
   insufficientOverlay: {
     position: "absolute",
