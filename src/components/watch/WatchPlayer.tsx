@@ -11,7 +11,7 @@ import { api } from "@/lib/api";
 import { formatDuration, formatStorage, formatStorageDetailed } from "@/lib/format";
 import { openOnWeb } from "@/lib/handoff";
 import { publicStream, signedStream } from "@/lib/mux";
-import type { ConsentResult, HeartbeatResult, Me, PlaybackSource, StartResult } from "@/lib/types";
+import type { AdvanceResult, ConsentResult, HeartbeatResult, Me, PlaybackSource, StartResult } from "@/lib/types";
 
 export type QualityOption = "auto" | "1080p" | "720p" | "360p";
 
@@ -67,14 +67,74 @@ export default function WatchPlayer(props: Props) {
   const seekTimer = useRef<NodeJS.Timeout | null>(null);
   const lastTapTime = useRef(0);
 
-  const seekBy = useCallback((seconds: number) => {
+  const maxPaidSec = useRef(freeSec);
+
+  const seekBy = useCallback(async (seconds: number) => {
     const dur = player.duration || durationSec || 1000;
-    const next = Math.max(0, Math.min(dur, player.currentTime + seconds));
-    player.currentTime = next;
-    setSeekBadge({ dir: seconds > 0 ? "forward" : "rewind", seconds: Math.abs(seconds) });
-    if (seekTimer.current) clearTimeout(seekTimer.current);
-    seekTimer.current = setTimeout(() => setSeekBadge(null), 700);
-  }, [player, durationSec]);
+    const target = Math.max(0, Math.min(dur, player.currentTime + seconds));
+
+    if (stageRef.current === "free") {
+      player.currentTime = target;
+      setSeekBadge({ dir: seconds > 0 ? "forward" : "rewind", seconds: Math.abs(seconds) });
+      if (seekTimer.current) clearTimeout(seekTimer.current);
+      seekTimer.current = setTimeout(() => setSeekBadge(null), 700);
+      return;
+    }
+
+    if (stageRef.current === "preview") {
+      if (target >= freeSec - 0.25) {
+        player.pause();
+        player.currentTime = freeSec;
+        exitFullscreen();
+        notifyFreeMinuteEnded();
+        go("prompt");
+        return;
+      }
+      player.currentTime = target;
+      setSeekBadge({ dir: seconds > 0 ? "forward" : "rewind", seconds: Math.abs(seconds) });
+      if (seekTimer.current) clearTimeout(seekTimer.current);
+      seekTimer.current = setTimeout(() => setSeekBadge(null), 700);
+      return;
+    }
+
+    if (stageRef.current === "paid") {
+      if (target <= maxPaidSec.current) {
+        player.currentTime = target;
+        setSeekBadge({ dir: seconds > 0 ? "forward" : "rewind", seconds: Math.abs(seconds) });
+        if (seekTimer.current) clearTimeout(seekTimer.current);
+        seekTimer.current = setTimeout(() => setSeekBadge(null), 700);
+        return;
+      }
+
+      const id = sessionId.current;
+      if (!id) return;
+
+      setSeekBadge({ dir: seconds > 0 ? "forward" : "rewind", seconds: Math.abs(seconds) });
+      if (seekTimer.current) clearTimeout(seekTimer.current);
+      seekTimer.current = setTimeout(() => setSeekBadge(null), 700);
+
+      try {
+        const res = await api<AdvanceResult>("/playback/advance", {
+          method: "POST",
+          body: { sessionId: id, targetSec: target },
+        });
+        if (res.state === "ok") {
+          maxPaidSec.current = res.maxPaidSec;
+          updateBalance(res.balanceMicroMb);
+          player.currentTime = target;
+        } else if (res.state === "insufficient") {
+          player.currentTime = res.maxPaidSec;
+          player.pause();
+          exitFullscreen();
+          updateBalance(res.balanceMicroMb);
+          showStorageWarning("⚠️ Insufficient storage space to skip forward. Top up to continue.");
+          go("insufficient");
+        }
+      } catch {
+        player.currentTime = Math.min(player.currentTime, maxPaidSec.current);
+      }
+    }
+  }, [player, durationSec, freeSec, exitFullscreen, updateBalance]);
   const stageRef = useRef<Stage>("idle");
   const videoViewRef = useRef<VideoView>(null);
   const isFullscreen = useRef(false);
@@ -221,6 +281,7 @@ export default function WatchPlayer(props: Props) {
         return;
       }
       heartbeatSec.current = result.heartbeatSec;
+      maxPaidSec.current = result.maxPaidSec ?? ((at ?? result.startAt) + result.heartbeatSec);
       updateBalance(result.balanceMicroMb);
       seq.current = 0;
       played.current = 0;
@@ -254,6 +315,7 @@ export default function WatchPlayer(props: Props) {
       }
       sessionId.current = result.sessionId;
       mode.current = result.mode;
+      maxPaidSec.current = freeSec;
 
       // Back after topping up: skip the free part and continue where they were.
       if (options.resumeFrom) {
@@ -350,11 +412,18 @@ export default function WatchPlayer(props: Props) {
       try {
         const result = await api<HeartbeatResult>("/playback/heartbeat", {
           method: "POST",
-          body: { sessionId: id, seq: seq.current, playedSec, needToken },
+          body: {
+            sessionId: id,
+            seq: seq.current,
+            playedSec,
+            needToken,
+            positionSec: player.currentTime,
+          },
         });
         played.current = Math.max(0, played.current - playedSec);
 
         if (result.state === "ok") {
+          if (result.maxPaidSec) maxPaidSec.current = Math.max(maxPaidSec.current, result.maxPaidSec);
           updateBalance(result.balanceMicroMb);
           if (isFullscreen.current) {
             showStorageWarning(`⚠️ Consuming space: ${formatStorageDetailed(result.balanceMicroMb)} remaining`);

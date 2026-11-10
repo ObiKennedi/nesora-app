@@ -231,7 +231,7 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
       setCurrentTime(player.currentTime);
       if (player.duration) setDuration(player.duration);
 
-      if (stage.current === "preview" && playedSec.current >= 60) {
+      if (stage.current === "preview" && (playedSec.current >= 60 || player.currentTime >= 60)) {
         const id = sessionId.current;
         if (!id) return;
         stage.current = "loading";

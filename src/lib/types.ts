@@ -72,13 +72,18 @@ export type StartResult =
   | { stage: "unavailable" };
 
 export type ConsentResult =
-  | { state: "ok"; source: PlaybackSource; startAt: number; balanceMicroMb: string; heartbeatSec: number }
+  | { state: "ok"; source: PlaybackSource; startAt: number; balanceMicroMb: string; heartbeatSec: number; maxPaidSec?: number }
   | { state: "insufficient"; balanceMicroMb: string }
   | { state: "ended" };
 
 export type HeartbeatResult =
-  | { state: "ok"; balanceMicroMb: string; source?: PlaybackSource }
+  | { state: "ok"; balanceMicroMb: string; maxPaidSec?: number; source?: PlaybackSource }
   | { state: "insufficient"; balanceMicroMb: string }
+  | { state: "ended" };
+
+export type AdvanceResult =
+  | { state: "ok"; balanceMicroMb: string; maxPaidSec: number }
+  | { state: "insufficient"; balanceMicroMb: string; maxPaidSec: number }
   | { state: "ended" };
 
 export type WatchVideo = FeedVideo & {
