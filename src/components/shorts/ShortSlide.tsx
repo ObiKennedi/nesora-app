@@ -1,12 +1,12 @@
 // File: nesora-app/src/components/shorts/ShortSlide.tsx
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Dimensions, Pressable, Share, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, Dimensions, Platform, Pressable, Share, StyleSheet, Text, ToastAndroid, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { useEvent } from "expo";
 import { useRouter } from "expo-router";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { EllipsisVertical, MessageSquareText, Play, RotateCcw, RotateCw, Share2, ThumbsUp, Volume2, VolumeX } from "lucide-react-native";
+import { AlertCircle, EllipsisVertical, MessageSquareText, Play, RotateCcw, RotateCw, Share2, ThumbsUp, Volume2, VolumeX } from "lucide-react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import CommentsSheet from "@/components/comments/CommentsSheet";
 import SubscribeButton from "@/components/feed/SubscribeButton";
@@ -62,16 +62,28 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
   const lastTapTime = useRef(0);
   const singleTapTimer = useRef<NodeJS.Timeout | null>(null);
 
+  const [showPrompt, setShowPrompt] = useState(false);
+  const [promptBusy, setPromptBusy] = useState(false);
+  const playedSinceBeat = useRef(0);
+
   const seekBy = useCallback((seconds: number) => {
+    const dur = player.duration || 60;
+    const next = Math.max(0, Math.min(dur, player.currentTime + seconds));
+
+    if (next >= 60 && stage.current === "preview" && sessionId.current) {
+      player.pause();
+      player.currentTime = 60;
+      setUserPaused(true);
+      stage.current = "prompt";
+      setShowPrompt(true);
+      return;
+    }
+
     try {
       player.seekBy(seconds);
     } catch {
-      const dur = player.duration || 60;
-      const next = Math.max(0, Math.min(dur, player.currentTime + seconds));
       player.currentTime = next;
     }
-    const dur = player.duration || 60;
-    const next = Math.max(0, Math.min(dur, player.currentTime + seconds));
     setCurrentTime(next);
     setSeekBadge((prev) => ({
       dir: seconds > 0 ? "forward" : "rewind",
@@ -82,7 +94,7 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
   }, [player]);
 
   const handlePress = useCallback((e: any) => {
-    if (insufficient) return;
+    if (insufficient || showPrompt) return;
     const now = Date.now();
     const screenWidth = Dimensions.get("window").width || 380;
     const x = e.nativeEvent?.pageX ?? e.nativeEvent?.locationX ?? (screenWidth / 2);
@@ -109,23 +121,33 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
         singleTapTimer.current = null;
       }, 300);
     }
-  }, [insufficient, seekBy]);
-
+  }, [insufficient, showPrompt, seekBy]);
 
   // Metering session state
   const sessionId = useRef<string | null>(null);
-  const stage = useRef<"idle" | "loading" | "free" | "preview" | "paid" | "insufficient">("idle");
+  const stage = useRef<"idle" | "loading" | "free" | "preview" | "prompt" | "paid" | "insufficient">("idle");
   const playedSec = useRef(0);
   const seq = useRef(0);
 
   const player = useVideoPlayer(publicStream(short.playbackId), (p) => {
     p.loop = true;
     p.muted = muted;
-    p.staysActiveInBackground = true;
+    p.staysActiveInBackground = false;
     if (active) p.play();
   });
   const { isPlaying } = useEvent(player, "playingChange", { isPlaying: player.playing });
   const { status } = useEvent(player, "statusChange", { status: player.status });
+
+  // Pause playback when app is not active (background / lock screen)
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state !== "active") {
+        player.pause();
+        setUserPaused(true);
+      }
+    });
+    return () => sub.remove();
+  }, [player]);
 
   const updateBalance = useCallback(
     (newBalance: string) => {
@@ -199,73 +221,101 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
       }
       stage.current = "idle";
       playedSec.current = 0;
+      playedSinceBeat.current = 0;
       seq.current = 0;
+      setShowPrompt(false);
     };
   }, [active, short.id]);
 
+  const handleConsentContinue = useCallback(async () => {
+    const id = sessionId.current;
+    if (!id) return;
+    setPromptBusy(true);
+    try {
+      const res = await api<ConsentResult>("/playback/consent", { method: "POST", body: { sessionId: id } });
+      setPromptBusy(false);
+      if (res.state === "ok") {
+        stage.current = "paid";
+        setShowPrompt(false);
+        setUserPaused(false);
+        player.play();
+        updateBalance(res.balanceMicroMb);
+      } else if (res.state === "insufficient") {
+        stage.current = "insufficient";
+        setShowPrompt(false);
+        player.pause();
+        setUserPaused(true);
+        setInsufficient(true);
+        updateBalance(res.balanceMicroMb);
+      } else {
+        stage.current = "idle";
+        setShowPrompt(false);
+      }
+    } catch {
+      setPromptBusy(false);
+      setShowPrompt(false);
+    }
+  }, [player, updateBalance]);
+
   // Play the visible Short, pause and rewind the rest.
   useEffect(() => {
-    if (active && !userPaused && !insufficient) player.play();
+    if (active && !userPaused && !insufficient && !showPrompt) player.play();
     else player.pause();
     if (!active) {
       player.currentTime = 0;
       setUserPaused(false);
     }
-  }, [active, userPaused, insufficient, player]);
+  }, [active, userPaused, insufficient, showPrompt, player]);
 
   // When player finishes buffering and is ready, trigger playback if active
   useEffect(() => {
-    if (active && !userPaused && !insufficient && status === "readyToPlay" && !player.playing) {
+    if (active && !userPaused && !insufficient && !showPrompt && status === "readyToPlay" && !player.playing) {
       player.play();
     }
-  }, [active, userPaused, insufficient, status, player]);
+  }, [active, userPaused, insufficient, showPrompt, status, player]);
 
-  // Track playback time: first 60 seconds are free without notification.
-  // After 60 seconds, 0.01 MB/min calculates seamlessly in the background.
+  // Track playback time: first 60 seconds are free preview.
+  // Reaching 60s pauses and prompts user — NEVER auto-consents or auto-drains!
   useEffect(() => {
     if (!active) return;
 
-    const timer = setInterval(async () => {
+    const timer = setInterval(() => {
       if (!player.playing) return;
-      playedSec.current += 1;
       setCurrentTime(player.currentTime);
       if (player.duration) setDuration(player.duration);
 
-      if (stage.current === "preview" && (playedSec.current >= 60 || player.currentTime >= 60)) {
-        const id = sessionId.current;
-        if (!id) return;
-        stage.current = "loading";
-        try {
-          const res = await api<ConsentResult>("/playback/consent", { method: "POST", body: { sessionId: id } });
-          if (res.state === "ok") {
-            stage.current = "paid";
-            updateBalance(res.balanceMicroMb);
-          } else if (res.state === "insufficient") {
-            stage.current = "insufficient";
-            player.pause();
-            setInsufficient(true);
-            updateBalance(res.balanceMicroMb);
-          } else {
-            stage.current = "idle";
+      if (stage.current === "preview") {
+        playedSec.current += 1;
+        if (playedSec.current >= 60 || player.currentTime >= 60) {
+          player.pause();
+          setUserPaused(true);
+          stage.current = "prompt";
+          setShowPrompt(true);
+          if (Platform.OS === "android") {
+            try {
+              ToastAndroid.show("⚠️ Your free 1 minute is up. Storage space is required to continue.", ToastAndroid.LONG);
+            } catch {}
           }
-        } catch {
-          stage.current = "preview";
         }
+      } else if (stage.current === "paid") {
+        playedSinceBeat.current += 1;
       }
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [active, player, updateBalance]);
+  }, [active, player]);
 
   // Heartbeat loop every 15 seconds while stage is "paid" (0.01 MB / min)
+  // ONLY counts when actively playing!
   useEffect(() => {
     if (!active) return;
 
     const beatTimer = setInterval(async () => {
       if (stage.current !== "paid") return;
       const id = sessionId.current;
-      if (!id || !player.playing) return;
+      if (!id || !player.playing || playedSinceBeat.current === 0) return;
 
+      const sec = playedSinceBeat.current;
       seq.current += 1;
       try {
         const res = await api<HeartbeatResult>("/playback/heartbeat", {
@@ -273,18 +323,25 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
           body: {
             sessionId: id,
             seq: seq.current,
-            playedSec: 15,
+            playedSec: sec,
             needToken: false,
+            positionSec: player.currentTime,
           },
         });
+        playedSinceBeat.current = Math.max(0, playedSinceBeat.current - sec);
 
         if (res.state === "ok") {
           updateBalance(res.balanceMicroMb);
         } else if (res.state === "insufficient") {
           stage.current = "insufficient";
           player.pause();
+          setUserPaused(true);
           setInsufficient(true);
           updateBalance(res.balanceMicroMb);
+        } else {
+          stage.current = "idle";
+          player.pause();
+          setUserPaused(true);
         }
       } catch {
         seq.current -= 1;
@@ -337,7 +394,7 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
           <ActivityIndicator color="#fff" size="small" />
         </View>
       ) : null}
-      {!isPlaying && userPaused && !insufficient ? (
+      {!isPlaying && userPaused && !insufficient && !showPrompt ? (
         <View style={styles.pausedControls} pointerEvents="box-none">
           <Pressable style={styles.pausedBtn} onPress={() => seekBy(-10)} hitSlop={12} accessibilityLabel="Rewind 10 seconds">
             <RotateCcw size={22} color="#fff" />
@@ -350,6 +407,36 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
             <RotateCw size={22} color="#fff" />
             <Text style={styles.pausedBtnText}>10s</Text>
           </Pressable>
+        </View>
+      ) : null}
+      {showPrompt ? (
+        <View style={styles.promptOverlay}>
+          <View style={styles.promptBadge}>
+            <AlertCircle size={14} color="#f59e0b" />
+            <Text style={styles.promptBadgeText}>Free 1-Minute Ended</Text>
+          </View>
+          <Text style={styles.promptTitle}>Free minute is up</Text>
+          <Text style={styles.promptSub}>
+            To keep watching, storage space will now start calculating at 0.01 MB per minute.
+          </Text>
+          <View style={styles.promptActions}>
+            <Button
+              title="Not now"
+              variant="secondary"
+              size="sm"
+              onPress={() => setShowPrompt(false)}
+              disabled={promptBusy}
+              style={{ flex: 1 }}
+            />
+            <Button
+              title={promptBusy ? "Starting…" : "Continue"}
+              variant="accent"
+              size="sm"
+              onPress={handleConsentContinue}
+              disabled={promptBusy}
+              style={{ flex: 1 }}
+            />
+          </View>
         </View>
       ) : null}
       {insufficient ? (
@@ -533,6 +620,57 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   loadingCenter: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center" },
+  promptOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.85)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+    zIndex: 30,
+  },
+  promptBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(245, 158, 11, 0.15)",
+    borderColor: "rgba(245, 158, 11, 0.3)",
+    borderWidth: 1,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    marginBottom: 10,
+  },
+  promptBadgeText: {
+    color: "#f59e0b",
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+  },
+  promptTitle: {
+    color: "#fff",
+    fontSize: 19,
+    fontWeight: "700",
+    marginBottom: 6,
+    textAlign: "center",
+  },
+  promptSub: {
+    color: "rgba(255,255,255,0.75)",
+    fontSize: 13,
+    lineHeight: 18,
+    textAlign: "center",
+    marginBottom: 16,
+    maxWidth: 280,
+  },
+  promptActions: {
+    flexDirection: "row",
+    gap: 10,
+    width: "100%",
+    maxWidth: 280,
+  },
   insufficientOverlay: {
     position: "absolute",
     top: 0,

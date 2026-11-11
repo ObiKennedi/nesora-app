@@ -404,6 +404,12 @@ export default function WatchPlayer(props: Props) {
     }, 1000);
 
     const beat = setInterval(async () => {
+      const activeOrFullscreen = AppState.currentState === "active" || isFullscreen.current;
+      // CRITICAL: NEVER send heartbeat or count storage when paused, inactive, or zero seconds watched!
+      if (!player.playing || player.status !== "readyToPlay" || !activeOrFullscreen || played.current === 0) {
+        return;
+      }
+
       const id = sessionId.current;
       if (!id) return;
       const playedSec = played.current;
@@ -437,9 +443,12 @@ export default function WatchPlayer(props: Props) {
           showStorageWarning("⚠️ You are out of storage space. Top up on nesora.org to continue.");
           go("insufficient");
         } else {
-          // Session was settled (e.g. a long pause). Start a new one where we are.
+          // Session was settled or ended (e.g. idle timeout). Pause playback and reset to idle — NEVER auto-restart!
+          player.pause();
+          exitFullscreen();
           sessionId.current = null;
-          void start({ resumeFrom: player.currentTime || undefined });
+          remember(player.currentTime);
+          go("idle");
         }
       } catch {
         seq.current -= 1; // retry the same sequence number next time
