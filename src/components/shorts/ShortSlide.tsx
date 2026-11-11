@@ -54,13 +54,29 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
   const [insufficient, setInsufficient] = useState(false);
   const [hasRendered, setHasRendered] = useState(false);
   const viewed = useRef(false);
+
+  // Metering session state
+  const sessionId = useRef<string | null>(null);
+  const stage = useRef<"idle" | "loading" | "free" | "preview" | "prompt" | "paid" | "insufficient">("idle");
+  const playedSec = useRef(0);
+  const seq = useRef(0);
+
+  const player = useVideoPlayer(publicStream(short.playbackId), (p) => {
+    p.loop = true;
+    p.muted = muted;
+    p.staysActiveInBackground = false;
+    if (active) p.play();
+  });
+  const { isPlaying } = useEvent(player, "playingChange", { isPlaying: player.playing });
+  const { status } = useEvent(player, "statusChange", { status: player.status });
+
   // Scrubber & Double-tap Seek state
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [seekBadge, setSeekBadge] = useState<null | { dir: "rewind" | "forward"; seconds: number }>(null);
-  const seekTimer = useRef<NodeJS.Timeout | null>(null);
+  const seekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTapTime = useRef(0);
-  const singleTapTimer = useRef<NodeJS.Timeout | null>(null);
+  const singleTapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [showPrompt, setShowPrompt] = useState(false);
   const [promptBusy, setPromptBusy] = useState(false);
@@ -122,21 +138,6 @@ function ShortPlayer({ short, active, muted }: { short: ShortItem; active: boole
       }, 300);
     }
   }, [insufficient, showPrompt, seekBy]);
-
-  // Metering session state
-  const sessionId = useRef<string | null>(null);
-  const stage = useRef<"idle" | "loading" | "free" | "preview" | "prompt" | "paid" | "insufficient">("idle");
-  const playedSec = useRef(0);
-  const seq = useRef(0);
-
-  const player = useVideoPlayer(publicStream(short.playbackId), (p) => {
-    p.loop = true;
-    p.muted = muted;
-    p.staysActiveInBackground = false;
-    if (active) p.play();
-  });
-  const { isPlaying } = useEvent(player, "playingChange", { isPlaying: player.playing });
-  const { status } = useEvent(player, "statusChange", { status: player.status });
 
   // Pause playback when app is not active (background / lock screen)
   useEffect(() => {

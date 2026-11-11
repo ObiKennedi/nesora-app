@@ -78,7 +78,7 @@ export type ConsentResult =
 
 export type HeartbeatResult =
   | { state: "ok"; balanceMicroMb: string; maxPaidSec?: number; source?: PlaybackSource }
-  | { state: "insufficient"; balanceMicroMb: string }
+  | { state: "insufficient"; balanceMicroMb: string; maxPaidSec?: number }
   | { state: "ended" };
 
 export type AdvanceResult =

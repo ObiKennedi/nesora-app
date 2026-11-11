@@ -1,10 +1,10 @@
 // File: nesora-app/src/components/watch/WatchPlayer.tsx
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Platform, Pressable, StyleSheet, Text, ToastAndroid, View } from "react-native";
+import { ActivityIndicator, Alert, AppState, Platform, Pressable, StyleSheet, Text, ToastAndroid, View } from "react-native";
 import { Image } from "expo-image";
 import { useEventListener } from "expo";
 import { useVideoPlayer, VideoView } from "expo-video";
-import { Check, HardDrive, Play, RotateCcw, Settings } from "lucide-react-native";
+import { Check, HardDrive, Play, RotateCcw, RotateCw, Settings } from "lucide-react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import Button from "@/components/ui/Button";
 import { api } from "@/lib/api";
@@ -64,10 +64,84 @@ export default function WatchPlayer(props: Props) {
   const [qualitySheetOpen, setQualitySheetOpen] = useState(false);
 
   const [seekBadge, setSeekBadge] = useState<null | { dir: "rewind" | "forward"; seconds: number }>(null);
-  const seekTimer = useRef<NodeJS.Timeout | null>(null);
+  const seekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTapTime = useRef(0);
-
   const maxPaidSec = useRef(freeSec);
+  const stageRef = useRef<Stage>("idle");
+  const videoViewRef = useRef<VideoView>(null);
+  const isFullscreen = useRef(false);
+  const balanceRef = useRef(props.initialBalanceMicroMb);
+  const sessionId = useRef<string | null>(null);
+  const mode = useRef<"FIRST_MINUTE" | "TRAILER" | null>(null);
+  const seq = useRef(0);
+  const played = useRef(0);
+  const heartbeatSec = useRef(15);
+  const tokenExpiresAt = useRef(0);
+
+  const go = useCallback((next: Stage) => {
+    stageRef.current = next;
+    setStage(next);
+  }, []);
+
+  const exitFullscreen = useCallback(() => {
+    try {
+      videoViewRef.current?.exitFullscreen();
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const updateBalance = useCallback(
+    (newBalance: string) => {
+      balanceRef.current = newBalance;
+      setBalance(newBalance);
+      queryClient.setQueryData<Me>(["me"], (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          storage: {
+            balanceMicroMb: newBalance,
+            label: formatStorage(newBalance),
+          },
+        };
+      });
+      queryClient.invalidateQueries({ queryKey: ["storage"] });
+    },
+    [queryClient]
+  );
+
+  const player = useVideoPlayer(null, (p) => {
+    p.timeUpdateEventInterval = 0.5;
+    p.staysActiveInBackground = false;
+  });
+
+  function notifyFreeMinuteEnded() {
+    if (Platform.OS === "android") {
+      try {
+        ToastAndroid.show("⚠️ Your free 1 minute is up. Storage space is now required to continue watching.", ToastAndroid.LONG);
+      } catch {}
+    }
+
+    Alert.alert(
+      "Your Free Minute Is Up",
+      `Your free 1-minute preview has ended. To continue watching, storage space will now start calculating at ${props.ratePerMinLabel} of storage per minute.`,
+      [
+        { text: "Not now", style: "cancel", onPress: declineContinue },
+        { text: "Continue & start paying", style: "default", onPress: () => consent(null) },
+      ],
+      { cancelable: true }
+    );
+  }
+
+  function showStorageWarning(text: string) {
+    if (Platform.OS === "android") {
+      try {
+        ToastAndroid.show(text, ToastAndroid.LONG);
+      } catch {
+        // ignore
+      }
+    }
+  }
 
   const seekBy = useCallback(async (seconds: number) => {
     const dur = player.duration || durationSec || 1000;
@@ -134,82 +208,7 @@ export default function WatchPlayer(props: Props) {
         player.currentTime = Math.min(player.currentTime, maxPaidSec.current);
       }
     }
-  }, [player, durationSec, freeSec, exitFullscreen, updateBalance]);
-  const stageRef = useRef<Stage>("idle");
-  const videoViewRef = useRef<VideoView>(null);
-  const isFullscreen = useRef(false);
-  const balanceRef = useRef(props.initialBalanceMicroMb);
-  const sessionId = useRef<string | null>(null);
-  const mode = useRef<"FIRST_MINUTE" | "TRAILER" | null>(null);
-  const seq = useRef(0);
-  const played = useRef(0);
-  const heartbeatSec = useRef(15);
-  const tokenExpiresAt = useRef(0);
-
-    function notifyFreeMinuteEnded() {
-    if (Platform.OS === "android") {
-      try {
-        ToastAndroid.show("⚠️ Your free 1 minute is up. Storage space is now required to continue watching.", ToastAndroid.LONG);
-      } catch {}
-    }
-
-    Alert.alert(
-      "Your Free Minute Is Up",
-      `Your free 1-minute preview has ended. To continue watching, storage space will now start calculating at ${props.ratePerMinLabel} of storage per minute.`,
-      [
-        { text: "Not now", style: "cancel", onPress: declineContinue },
-        { text: "Continue & start paying", style: "default", onPress: () => consent(null) },
-      ],
-      { cancelable: true }
-    );
-  }
-
-  function showStorageWarning(text: string) {
-    if (Platform.OS === "android") {
-      try {
-        ToastAndroid.show(text, ToastAndroid.LONG);
-      } catch {
-        // ignore
-      }
-    }
-  }
-
-  const exitFullscreen = useCallback(() => {
-    try {
-      videoViewRef.current?.exitFullscreen();
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  const updateBalance = useCallback(
-    (newBalance: string) => {
-      balanceRef.current = newBalance;
-      setBalance(newBalance);
-      queryClient.setQueryData<Me>(["me"], (old) => {
-        if (!old) return old;
-        return {
-          ...old,
-          storage: {
-            balanceMicroMb: newBalance,
-            label: formatStorage(newBalance),
-          },
-        };
-      });
-      queryClient.invalidateQueries({ queryKey: ["storage"] });
-    },
-    [queryClient]
-  );
-
-  const player = useVideoPlayer(null, (p) => {
-    p.timeUpdateEventInterval = 0.5;
-    p.staysActiveInBackground = false;
-  });
-
-  const go = useCallback((next: Stage) => {
-    stageRef.current = next;
-    setStage(next);
-  }, []);
+  }, [player, durationSec, freeSec, exitFullscreen, updateBalance, go]);
 
   // ---- session lifecycle -----------------------------------------------------
 
